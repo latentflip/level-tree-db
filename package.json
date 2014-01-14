@@ -9,7 +9,8 @@
   "author": "",
   "license": "BSD-2-Clause",
   "devDependencies": {
-    "level": "~0.18.0"
+    "level": "~0.18.0",
+    "leveldown": "~0.10.2"
   },
   "dependencies": {
     "uuid": "~1.4.1"
