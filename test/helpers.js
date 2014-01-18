@@ -3,7 +3,7 @@ var async = require('async');
 module.exports = {
     makeTree: function (tree, structure, done) {
         var nodeIds = {};
-        var rootId = tree.rootId();
+        var rootId = tree.rootId;
         nodeIds[structure.root] = rootId;
         
         var populateNode = function (name, cb) {

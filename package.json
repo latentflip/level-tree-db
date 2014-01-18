@@ -1,13 +1,13 @@
 {
   "name": "level-tree-db",
-  "version": "0.0.0",
-  "description": "ERROR: No README data found!",
-  "main": "test.js",
+  "version": "0.0.1",
+  "description": "A generic tree structure backed by leveldb",
+  "main": "tree.js",
   "scripts": {
     "test": "mocha test/"
   },
-  "author": "",
-  "license": "BSD-2-Clause",
+  "author": "Philip Roberts",
+  "license": "MIT",
   "devDependencies": {
     "level": "~0.18.0",
     "leveldown": "~0.10.2",
@@ -18,7 +18,4 @@
   "dependencies": {
     "uuid": "~1.4.1"
   },
-  "directories": {
-    "test": "test"
-  }
 }

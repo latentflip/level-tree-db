@@ -13,13 +13,13 @@ var Tree = module.exports = function (options, ready) {
     this.ready = false;
     this.db = options.db;
     this.treeId = options.treeId;
-
+    this.rootId = this.makeRootId();
     var onReady = function (err) {
         if (err) {
             if (ready) {
                 ready(err);
             } else {
-                throw new Error(error);
+                throw new Error(err);
             }
         } else {
             this.ready = true;
@@ -49,7 +49,7 @@ Tree.prototype.makeNodeParentKey = function (id) {
     return id + '/parent';
 };
 
-Tree.prototype.rootId = function () {
+Tree.prototype.makeRootId = function () {
     return this.treeId + '/root';
 };
 
@@ -88,28 +88,32 @@ Tree.prototype.callDb = function (type/*, args... */) {
 };
 
 Tree.prototype._setupRoot = function (cb) {
-    var rootId = this.rootId();
-    this.db.get(rootId, function (err, node) {
+    this.db.get(this.rootId, function (err, node) {
         if (!err && node) return cb();
         
-        this.db.put(rootId, [], cb);
+        this.db.put(this.rootId, [], cb);
     }.bind(this));
 };
 
-Tree.prototype.makeRoot = function (cb) {
-    this.db.put(this.rootId(), [], cb);
-};
-
 Tree.prototype.setNodeData = function (id, data, cb) {
-    this.db.put(this.makeNodeDataKey(id), data, cb);
+    this.callDb('put', this.makeNodeDataKey(id), data, cb);
 };
 
 Tree.prototype.getNodeData = function (id, cb) {
-    this.db.get(this.makeNodeDataKey(id), cb);
+    this.callDb('get', this.makeNodeDataKey(id), function (err, data) {
+        if (err) {
+            if (err.notFound) {
+                data = {};
+            } else {
+                throw (err);
+            }
+        }
+        cb(null, data);          
+    });
 };
 
 Tree.prototype.deleteNodeData = function (id, cb) {
-    this.db.del(this.makeNodeDataKey(id), cb);
+    this.callDb('del', this.makeNodeDataKey(id), cb);
 };
 
 Tree.prototype.getNode = function (id, cb) {
@@ -117,8 +121,8 @@ Tree.prototype.getNode = function (id, cb) {
 };
 
 Tree.prototype.getNodeParent = function (id, cb) {
-    this.db.get(this.makeNodeParentKey(id), function (err, parentId) {
-        this.db.get(parentId, function (err, parent) {
+    this.callDb('get', this.makeNodeParentKey(id), function (err, parentId) {
+        this.callDb('get', parentId, function (err, parent) {
             if (err) return cb(err);
             cb(null, parent, parentId);
         });
@@ -129,13 +133,14 @@ Tree.prototype.getNodeAndData = function (id, cb) {
     this.getNode(id, function (err, children) {
         if (err) return cb(err);
         this.getNodeData(id, function (err, data) {
+            if (err) return cb(err);
             cb(err, children, data);
         }.bind(this));
     }.bind(this));
 };
 
 Tree.prototype.getRoot = function (cb) {
-    this.getNode(this.rootId(), cb);
+    this.getNode(this.rootId, cb);
 };
 
 /* opts:
@@ -145,7 +150,7 @@ Tree.prototype.getRoot = function (cb) {
  */
 
 Tree.prototype.traverse = function (opts, onNode, cb) {
-    var startNodeId = opts.startNode || this.rootId();
+    var startNodeId = opts.startNode || this.rootId;
     var queueOp = opts.order === 'breadth' ? 'shift' : 'pop';
     var reverseQueue = opts.order === 'depth';
     var isSearch = opts.type === 'search';
@@ -172,6 +177,7 @@ Tree.prototype.traverse = function (opts, onNode, cb) {
             }
         });
     }.bind(this);
+
     workQueue();
 };
 
@@ -181,6 +187,7 @@ Tree.prototype.breadthWalk = function (startNodeId, onNode, cb) {
         onNode = startNodeId;
         startNodeId = undefined;
     }
+
     this.traverse({ startNode: startNodeId, order: 'breadth', type: 'walk' }, onNode, cb);
 };
 
@@ -216,7 +223,7 @@ Tree.prototype.insertNode = function (parentId, data, cb) {
     var dataKey = this.makeNodeDataKey(id);
     var parentKey = this.makeNodeParentKey(id);
 
-    this.db.get(parentId, function (err, parent) {
+    this.callDb('get', parentId, function (err, parent) {
         parent.push(id);
         this.db.batch()
                 .put(parentId, parent)
@@ -238,8 +245,8 @@ Tree.prototype.deleteNode = function (nodeId, cb) {
     }, function (err) {
         if (err) return cb(err);               
 
-        this.db.get(this.makeNodeParentKey(nodeId), function (err, parentNodeId) {
-            this.db.get(parentNodeId, function (err, parent) {
+        this.callDb('get', this.makeNodeParentKey(nodeId), function (err, parentNodeId) {
+            this.callDb('get', parentNodeId, function (err, parent) {
                 if (err) return cb(err);
                 without(parent, nodeId);
                 batch.put(parentNodeId, parent)

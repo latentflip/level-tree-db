@@ -1,17 +1,8 @@
-# level-tree-db (could probably have a better name)
-
-A generic tree backed by level db.
-
-## Example
-
-### Create a Tree, Insert some elements, breadth-first walk the tree
-
-```javascript
 var level = require('level');
 var leveldown = require('leveldown');
 var Tree = require('./tree');
 
-var dbPath = './trees.db';
+var dbPath = './test/trees.db';
 
 leveldown.destroy(dbPath, function () {
     var db = level(dbPath, { valueEncoding: 'json' });
@@ -42,15 +33,3 @@ leveldown.destroy(dbPath, function () {
         });
     });
 });
-```
-
-outputs:
-
-```
-Node myTree/root has data {} and children [ 'myTree/node-f9851923-15a6-418c-898b-9af6a96fd732',
-  'myTree/node-fa37a40c-405b-458b-a302-55adf44083a2' ]
-Node myTree/node-f9851923-15a6-418c-898b-9af6a96fd732 has data { name: 'Node A' } and children []
-Node myTree/node-fa37a40c-405b-458b-a302-55adf44083a2 has data { name: 'Node B' } and children [ 'myTree/node-b8a48562-7431-49cf-8f58-60207d84606b' ]
-Node myTree/node-b8a48562-7431-49cf-8f58-60207d84606b has data { name: 'Node C' } and children []
-Done walking
-```
