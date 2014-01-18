@@ -1,13 +1,11 @@
 var async = require('async');
-var Tree = require('../tree');
-var testFile = __dirname + '/db-test.db';
-
+var expect = require('chai').expect;
 var level = require('level');
 var leveldown = require('leveldown');
 var helpers = require('./helpers');
 
-var expect = require('chai').expect;
-var testFile = __dirname + '/db-test.db';
+var Tree = require('../tree');
+var testFile = __dirname + '/db-test-walk.db';
 
 Tree.prototype.makeNodeId = function (data) {
     return this.treeId + '/node-' + data.name;

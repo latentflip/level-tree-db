@@ -4,7 +4,7 @@
   "description": "ERROR: No README data found!",
   "main": "test.js",
   "scripts": {
-    "test": "mocha test/walk.js"
+    "test": "mocha test/"
   },
   "author": "",
   "license": "BSD-2-Clause",

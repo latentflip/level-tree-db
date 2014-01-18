@@ -1,4 +1,6 @@
 var uuid = require('uuid');
+var EventEmitter = require('events').EventEmitter;
+var util = require('util');
 
 var without = function (array, element) {
     var idx = array.indexOf(element);
@@ -7,20 +9,32 @@ var without = function (array, element) {
     return array;
 };
 
-
 var Tree = module.exports = function (options, ready) {
+    this.ready = false;
     this.db = options.db;
     this.treeId = options.treeId;
 
     var onReady = function (err) {
-        ready(err, this);
+        if (err) {
+            if (ready) {
+                ready(err);
+            } else {
+                throw new Error(error);
+            }
+        } else {
+            this.ready = true;
+            if (ready) {
+                ready(null, this);
+            }
+            this.processDbCallQueue();
+        }
     }.bind(this);
 
-    this.getRoot(function (err, root) {
-        if (err || !root) return this.makeRoot(onReady);
-        return onReady();
-    }.bind(this));
+    this._setupRoot(onReady);
 };
+
+util.inherits(Tree, EventEmitter);
+
 
 Tree.prototype.makeNodeId = function () {
     var id = uuid.v4();
@@ -37,6 +51,49 @@ Tree.prototype.makeNodeParentKey = function (id) {
 
 Tree.prototype.rootId = function () {
     return this.treeId + '/root';
+};
+
+Tree.prototype.queueDbCall = function (call) {
+    this.dbCallQueue = this.dbCallQueue || [];
+    this.dbCallQueue.push(call);
+};
+
+Tree.prototype.processDbCallQueue = function () {
+    while (this.dbCallQueue && this.dbCallQueue.length) {
+        this._processNext();
+    }
+};
+
+Tree.prototype._processNext = function () {
+    if (this.ready) {
+        var fn = this.dbCallQueue.shift();
+        if (fn) fn();
+    }
+};
+
+Tree.prototype.callDb = function (type/*, args... */) {
+    var args = Array.prototype.slice.call(arguments);
+    args.shift();
+
+    var doCall = function (done) {
+        this.db[type].apply(this.db, args);
+    }.bind(this);
+
+    if (this.ready) { 
+        doCall();
+    } else {
+        this.queueDbCall(doCall);
+        this._processNext();
+    }
+};
+
+Tree.prototype._setupRoot = function (cb) {
+    var rootId = this.rootId();
+    this.db.get(rootId, function (err, node) {
+        if (!err && node) return cb();
+        
+        this.db.put(rootId, [], cb);
+    }.bind(this));
 };
 
 Tree.prototype.makeRoot = function (cb) {
@@ -56,7 +113,7 @@ Tree.prototype.deleteNodeData = function (id, cb) {
 };
 
 Tree.prototype.getNode = function (id, cb) {
-    this.db.get(id, cb);
+    this.callDb('get', id, cb);
 };
 
 Tree.prototype.getNodeParent = function (id, cb) {
