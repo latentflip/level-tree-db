@@ -1,5 +1,13 @@
 var uuid = require('uuid');
 
+var without = function (array, element) {
+    var idx = array.indexOf(element);
+    if (idx < 0) return array;
+    array.splice(idx, 1);
+    return array;
+};
+
+
 var Tree = module.exports = function (options, ready) {
     this.db = options.db;
     this.treeId = options.treeId;
@@ -19,8 +27,12 @@ Tree.prototype.makeNodeId = function () {
     return this.treeId + '/node-' + id;
 };
 
-Tree.prototype.makeNodeDataId = function (id) {
+Tree.prototype.makeNodeDataKey = function (id) {
     return id + '/data';
+};
+
+Tree.prototype.makeNodeParentKey = function (id) {
+    return id + '/parent';
 };
 
 Tree.prototype.rootId = function () {
@@ -32,19 +44,28 @@ Tree.prototype.makeRoot = function (cb) {
 };
 
 Tree.prototype.setNodeData = function (id, data, cb) {
-    this.db.put(this.makeNodeDataId(id), data, cb);
+    this.db.put(this.makeNodeDataKey(id), data, cb);
 };
 
 Tree.prototype.getNodeData = function (id, cb) {
-    this.db.get(this.makeNodeDataId(id), cb);
+    this.db.get(this.makeNodeDataKey(id), cb);
 };
 
 Tree.prototype.deleteNodeData = function (id, cb) {
-    this.db.del(this.makeNodeDataId(id), cb);
+    this.db.del(this.makeNodeDataKey(id), cb);
 };
 
 Tree.prototype.getNode = function (id, cb) {
     this.db.get(id, cb);
+};
+
+Tree.prototype.getNodeParent = function (id, cb) {
+    this.db.get(this.makeNodeParentKey(id), function (err, parentId) {
+        this.db.get(parentId, function (err, parent) {
+            if (err) return cb(err);
+            cb(null, parent, parentId);
+        });
+    }.bind(this));
 };
 
 Tree.prototype.getNodeAndData = function (id, cb) {
@@ -60,21 +81,35 @@ Tree.prototype.getRoot = function (cb) {
     this.getNode(this.rootId(), cb);
 };
 
-Tree.prototype._breadthWalk = function (onNode, isSearch, done) {
-    var id = this.rootId();
-    var queue = [];
-    queue.push(id);
+/* opts:
+ *  - startNode: nodeId to start searching from
+ *  - order: ['breadth' / 'depth']
+ *  - type: ['walk', / 'search']
+ */
+
+Tree.prototype.traverse = function (opts, onNode, cb) {
+    var startNodeId = opts.startNode || this.rootId();
+    var queueOp = opts.order === 'breadth' ? 'shift' : 'pop';
+    var reverseQueue = opts.order === 'depth';
+    var isSearch = opts.type === 'search';
+
+    var queue = [ startNodeId ];
 
     var workQueue = function () {
-        var next = queue.shift();
+        var nodeId = queue[queueOp]();
 
-        this.getNodeAndData(next, function (err, children, data) {
-            if (err) return done(err);
+        this.getNodeAndData(nodeId, function (err, children, data) {
+            if (err) return cb(err);
 
-            var found = onNode(next, children, data);
-            queue.push.apply(queue, children);
+            var found = onNode(nodeId, children, data);
+            if (reverseQueue) {
+                queue.push.apply(queue, children.reverse());
+            } else {
+                queue.push.apply(queue, children);
+            }
+
             if ((isSearch && found) || queue.length === 0) {
-                done(null, next, children, data);
+                cb(null, nodeId, children, data);
             } else {
                 workQueue();
             }
@@ -83,58 +118,96 @@ Tree.prototype._breadthWalk = function (onNode, isSearch, done) {
     workQueue();
 };
 
-Tree.prototype.breadthWalk = function (onNode, done) {
-    this._breadthWalk(onNode, false, done);
+Tree.prototype.breadthWalk = function (startNodeId, onNode, cb) {
+    if (arguments.length === 2 && typeof startNodeId === 'function') {
+        cb = onNode;
+        onNode = startNodeId;
+        startNodeId = undefined;
+    }
+    this.traverse({ startNode: startNodeId, order: 'breadth', type: 'walk' }, onNode, cb);
 };
 
-Tree.prototype.breadthSearch = function (onNode, done) {
-    this._breadthWalk(onNode, true, done);
+Tree.prototype.breadthSearch = function (startNodeId, onNode, cb) {
+    if (arguments.length === 2 && typeof startNodeId === 'function') {
+        cb = onNode;
+        onNode = startNodeId;
+        startNodeId = undefined;
+    }
+    this.traverse({ startNode: startNodeId, order: 'breadth', type: 'search' }, onNode, cb);
 };
 
-Tree.prototype._depthWalk = function (onNode, isSearch, done) {
-    var id = this.rootId();
-    var stack = [];
-    stack.push(id);
-
-    var workStack = function () {
-        var next = stack.pop();
-
-        this.getNodeAndData(next, function (err, children, data) {
-            if (err) return done(err);
-            var found = onNode(next, children, data);
-            stack.push.apply(stack, children.reverse());
-            if ((isSearch && found) || stack.length === 0) {
-                done(null, next, children, data);
-            } else {
-                workStack();
-            }
-        });
-    }.bind(this);
-
-    workStack();
+Tree.prototype.depthSearch = function (startNodeId, onNode, cb) {
+    if (arguments.length === 2 && typeof startNodeId === 'function') {
+        cb = onNode;
+        onNode = startNodeId;
+        startNodeId = undefined;
+    }
+    this.traverse({ startNode: startNodeId, order: 'depth', type: 'search' }, onNode, cb);
 };
 
-Tree.prototype.depthSearch = function (onNode, done) {
-    this._depthWalk(onNode, true, done);
-};
-
-Tree.prototype.depthWalk = function (onNode, done) {
-    this._depthWalk(onNode, false, done);
+Tree.prototype.depthWalk = function (startNodeId, onNode, cb) {
+    if (arguments.length === 2 && typeof startNodeId === 'function') {
+        cb = onNode;
+        onNode = startNodeId;
+        startNodeId = undefined;
+    }
+    this.traverse({ startNode: startNodeId, order: 'depth', type: 'walk' }, onNode, cb);
 };
 
 Tree.prototype.insertNode = function (parentId, data, cb) {
-    var id = this.makeNodeId();
-    var dataId = this.makeNodeDataId(id);
+    var id = this.makeNodeId(data);
+    var dataKey = this.makeNodeDataKey(id);
+    var parentKey = this.makeNodeParentKey(id);
 
     this.db.get(parentId, function (err, parent) {
         parent.push(id);
         this.db.batch()
                 .put(parentId, parent)
                 .put(id, [])
-                .put(dataId, data)
+                .put(dataKey, data)
+                .put(parentKey, parentId)
                 .write(function (err) {
                     if (err) return cb(err);
                     else return cb(null, id);
                 });
+    }.bind(this));
+};
+
+Tree.prototype.deleteNode = function (nodeId, cb) {
+    var batch = this.db.batch();
+
+    this.breadthWalk(nodeId, function (id, children, data) {
+        batch = batch.del(id);
+    }, function (err) {
+        if (err) return cb(err);               
+
+        this.db.get(this.makeNodeParentKey(nodeId), function (err, parentNodeId) {
+            this.db.get(parentNodeId, function (err, parent) {
+                if (err) return cb(err);
+                without(parent, nodeId);
+                batch.put(parentNodeId, parent)
+                     .write(cb);
+            });
+        }.bind(this));
+    }.bind(this));
+};
+
+Tree.prototype.moveNode = function (nodeId, newParentId, cb) {
+    var oldParentId;
+
+    this.getNodeParent(nodeId, function (err, oldParent, oldParentId) {
+        if (err) return cb(err);
+        this.getNode(newParentId, function (err, newParent) {
+            if (err) return cb(err);
+
+            newParent.push(nodeId);
+            oldParent = without(oldParent, nodeId);
+
+            this.db.batch()
+                    .put(oldParentId, oldParent)
+                    .put(newParentId, newParent)
+                    .write(cb);
+            
+        }.bind(this));
     }.bind(this));
 };
