@@ -39,6 +39,10 @@ Tree.prototype.getNodeData = function (id, cb) {
     this.db.get(this.makeNodeDataId(id), cb);
 };
 
+Tree.prototype.deleteNodeData = function (id, cb) {
+    this.db.del(this.makeNodeDataId(id), cb);
+};
+
 Tree.prototype.getNode = function (id, cb) {
     this.db.get(id, cb);
 };
@@ -56,42 +60,53 @@ Tree.prototype.getRoot = function (cb) {
     this.getNode(this.rootId(), cb);
 };
 
-Tree.prototype.breadthWalk = function (onNode, done) {
+Tree.prototype._breadthWalk = function (onNode, isSearch, done) {
     var id = this.rootId();
     var queue = [];
     queue.push(id);
 
     var workQueue = function () {
         var next = queue.shift();
-        
+
         this.getNodeAndData(next, function (err, children, data) {
-            onNode(next, children, data);
+            if (err) return done(err);
+
+            var found = onNode(next, children, data);
             queue.push.apply(queue, children);
-            if (queue.length) {
-                workQueue();
+            if ((isSearch && found) || queue.length === 0) {
+                done(null, next, children, data);
             } else {
-                done();
+                workQueue();
             }
         });
     }.bind(this);
     workQueue();
 };
 
-Tree.prototype.depthWalk = function (onNode, done) {
+Tree.prototype.breadthWalk = function (onNode, done) {
+    this._breadthWalk(onNode, false, done);
+};
+
+Tree.prototype.breadthSearch = function (onNode, done) {
+    this._breadthWalk(onNode, true, done);
+};
+
+Tree.prototype._depthWalk = function (onNode, isSearch, done) {
     var id = this.rootId();
     var stack = [];
     stack.push(id);
 
     var workStack = function () {
         var next = stack.pop();
-        
+
         this.getNodeAndData(next, function (err, children, data) {
-            onNode(next, children, data);
+            if (err) return done(err);
+            var found = onNode(next, children, data);
             stack.push.apply(stack, children.reverse());
-            if (stack.length) {
-                workStack();
+            if ((isSearch && found) || stack.length === 0) {
+                done(null, next, children, data);
             } else {
-                done();
+                workStack();
             }
         });
     }.bind(this);
@@ -99,6 +114,13 @@ Tree.prototype.depthWalk = function (onNode, done) {
     workStack();
 };
 
+Tree.prototype.depthSearch = function (onNode, done) {
+    this._depthWalk(onNode, true, done);
+};
+
+Tree.prototype.depthWalk = function (onNode, done) {
+    this._depthWalk(onNode, false, done);
+};
 
 Tree.prototype.insertNode = function (parentId, data, cb) {
     var id = this.makeNodeId();
