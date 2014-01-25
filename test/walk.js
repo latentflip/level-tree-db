@@ -117,6 +117,54 @@ describe("Traversal", function () {
         });
     });
 
+    it('depth leaf seaches', function (done) {
+        helpers.makeTree(tree, structure, function () {
+            var searched = '';
+            tree.depthLeafSearch(function (id, children, data, isLeaf) {
+                searched += data.name;
+
+                if ((isLeaf && data.name === 'l') || /root/.test(id) || (!isLeaf && data.name.charCodeAt(0) >= 100/*g*/)) {
+                    return true;
+                }
+            }, function (err, foundId) {
+                expect(foundId).to.equal(tree.makeNodeId({ name: 'l' }));
+                expect(searched).to.equal('abcdgkl');
+                done();
+            });
+        });
+    });
+
+    it('breadth leaf seaches', function (done) {
+        helpers.makeTree(tree, structure, function () {
+            var searched = '';
+            tree.breadthSearch(function (id, children, data) {
+                searched += data.name;
+                if (data.name == 'g') return true;
+            }, function (err, foundId) {
+                expect(searched).to.equal('abcdefg');
+                expect(foundId).to.equal(tree.makeNodeId({ name: 'g' }));
+                done();
+            });
+        });
+    });
+
+    it('breadth leaf seaches', function (done) {
+        helpers.makeTree(tree, structure, function () {
+            var searched = '';
+            tree.breadthLeafSearch(function (id, children, data, isLeaf) {
+                searched += data.name;
+
+                if ((isLeaf && data.name === 'l') || /root/.test(id) || (!isLeaf && data.name.charCodeAt(0) >= 100/*g*/)) {
+                    return true;
+                }
+            }, function (err, foundId) {
+                expect(foundId).to.equal(tree.makeNodeId({ name: 'l' }));
+                expect(searched).to.equal('abcdghkl');
+                done();
+            });
+        });
+    });
+
     it('helper deconstructs', function (done) {
         helpers.makeTree(tree, structure, function (err) {
             helpers.toStructure(tree, function (err, structureOut) {
