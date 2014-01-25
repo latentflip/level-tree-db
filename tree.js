@@ -3,6 +3,18 @@ var EventEmitter = require('events').EventEmitter;
 var util = require('util');
 var Promise = require('bluebird');
 
+var dearrayify = function (cb) {
+    var oldcb = cb;
+    cb = function (err, args) {
+        args = args || [];
+        if (!(args instanceof Array)) args = [ args ];
+
+        args.unshift(err);
+        oldcb.apply(this, args);
+    };
+    return cb;
+};
+
 var without = function (array, element) {
     var idx = array.indexOf(element);
     if (idx < 0) return array;
@@ -76,8 +88,8 @@ Tree.prototype._setupRoot = function (cb) {
 Tree.prototype.setNodeData = function (id, data, cb) {
     //this.callDb('put', this.makeNodeDataKey(id), data, cb);
     return this.then(function () {
-        return this.db.putAsync(this.makeNodeDataKey(id), data).nodeify(cb);
-    });
+        return this.db.putAsync(this.makeNodeDataKey(id), data);
+    }).nodeify(cb);
 };
 
 Tree.prototype.getNodeData = function (id, cb) {
@@ -85,20 +97,20 @@ Tree.prototype.getNodeData = function (id, cb) {
         return this.db.getAsync(this.makeNodeDataKey(id)).catch(
             function (err) { return err.notFound; },
             function (err) { return {}; }
-        ).nodeify(cb);
-    });
+        );
+    }).nodeify(cb);
 };
 
 Tree.prototype.deleteNodeData = function (id, cb) {
     return this.then(function () {
-        return this.db.delAsync(this.makeNodeDataKey(id)).nodeify(cb);
-    });
+        return this.db.delAsync(this.makeNodeDataKey(id));
+    }).nodeify(cb);
 };
 
 Tree.prototype.getNode = function (id, cb) {
     return this.then(function () {
-        return this.db.getAsync(id).nodeify(cb);
-    });
+        return this.db.getAsync(id);
+    }).nodeify(cb);
 };
 
 Tree.prototype.getNodeParent = function (id, cb) {
@@ -107,24 +119,10 @@ Tree.prototype.getNodeParent = function (id, cb) {
         var parentId = this.getNode(this.makeNodeParentKey(id));
         var parent = parentId.then(function (parentId) { return this.getNode(parentId); });
 
-        if (cb) {
-            var oldcb = cb;
-            cb = function (err, args) {
-                args = args || [];
-                args.unshift(err);
-                oldcb.apply(self, args);
-            };
-        }
+        if (cb) cb = dearrayify(cb);
 
-        var p = Promise.all([ parent, parentId ]).nodeify(cb);
-    });
-
-    //this.callDb('get', this.makeNodeParentKey(id), function (err, parentId) {
-    //    this.callDb('get', parentId, function (err, parent) {
-    //        if (err) return cb(err);
-    //        cb(null, parent, parentId);
-    //    });
-    //}.bind(this));
+        return Promise.all([ parent, parentId ]);
+    }).nodeify(cb);
 };
 
 Tree.prototype.getNodeAndData = function (id, cb) {
@@ -134,15 +132,8 @@ Tree.prototype.getNodeAndData = function (id, cb) {
             children: this.getNode(id),
             data: this.getNodeData(id)
         }).then(function (result) {
-            //Bleurgh
-            if (cb) {
-                var oldcb = cb;
-                cb = function (err, args) {
-                    args = args || [];
-                    args.unshift(err);
-                    oldcb.apply(self, args);
-                };
-            }
+
+            if (cb) cb = dearrayify(cb);
 
             return Promise.cast([result.children, result.data]).nodeify(cb);
         }.bind(this));
@@ -169,43 +160,48 @@ Tree.prototype.traverse = function (opts, onNode, cb) {
 
     var queue = [ startNodeId ];
 
-    var workQueue = function () {
-        var nodeId = queue[queueOp]();
-        var skipChildren = false;
+    if (cb) cb = dearrayify(cb);
 
-        this.getNodeAndData(nodeId, function (err, children, data) {
-            if (err) return cb(err);
+    var self = this;
 
-            var isLeafNode = children.length === 0;
-            var found = onNode(nodeId, children, data, isLeafNode);
+    var p = new Promise(function (yes, no) {
+        var workQueue = function () {
+            var nodeId = queue[queueOp]();
+            var skipChildren = false;
 
-            if (isSearch && !isLeafSearch) {
-                if (found) return cb(null, nodeId, children, data);
-            }
+            self.getNodeAndData(nodeId).spread(function (children, data) {
+                var isLeafNode = children.length === 0;
+                var found = onNode(nodeId, children, data, isLeafNode);
 
-            if (isLeafSearch) {
-                if (found && isLeafNode) { //is leaf
-                    return cb(null, nodeId, children, data);
+                if (isSearch && !isLeafSearch) {
+                    if (found) return yes([nodeId, children, data]);
                 }
-            }
 
-            if (!isLeafSearch || (isLeafSearch && found)) {
-                if (reverseQueue) {
-                    queue.push.apply(queue, children.reverse());
+                if (isLeafSearch) {
+                    if (found && isLeafNode) { //is leaf
+                        return yes([nodeId, children, data]);
+                    }
+                }
+
+                if (!isLeafSearch || (isLeafSearch && found)) {
+                    if (reverseQueue) {
+                        queue.push.apply(queue, children.reverse());
+                    } else {
+                        queue.push.apply(queue, children);
+                    }
+                }
+
+                if (queue.length === 0) {
+                    yes();
                 } else {
-                    queue.push.apply(queue, children);
+                    workQueue();
                 }
-            }
+            });
+        }.bind(this);
+        workQueue();
+    });
 
-            if (queue.length === 0) {
-                cb(null);
-            } else {
-                workQueue();
-            }
-        });
-    }.bind(this);
-
-    workQueue();
+    return p.nodeify(cb);
 };
 
 Tree.prototype.breadthWalk = function (startNodeId, onNode, cb) {
@@ -214,8 +210,8 @@ Tree.prototype.breadthWalk = function (startNodeId, onNode, cb) {
         onNode = startNodeId;
         startNodeId = undefined;
     }
-
-    this.traverse({ startNode: startNodeId, order: 'breadth', type: 'walk' }, onNode, cb);
+    if (cb) cb = dearrayify(cb);
+    return this.traverse({ startNode: startNodeId, order: 'breadth', type: 'walk' }, onNode).nodeify(cb);
 };
 
 Tree.prototype.breadthSearch = function (startNodeId, onNode, cb) {
@@ -224,7 +220,8 @@ Tree.prototype.breadthSearch = function (startNodeId, onNode, cb) {
         onNode = startNodeId;
         startNodeId = undefined;
     }
-    this.traverse({ startNode: startNodeId, order: 'breadth', type: 'search' }, onNode, cb);
+    if (cb) cb = dearrayify(cb);
+    return this.traverse({ startNode: startNodeId, order: 'breadth', type: 'search' }, onNode).nodeify(cb);
 };
 
 Tree.prototype.breadthLeafSearch = function (startNodeId, onNode, cb) {
@@ -233,7 +230,8 @@ Tree.prototype.breadthLeafSearch = function (startNodeId, onNode, cb) {
         onNode = startNodeId;
         startNodeId = undefined;
     }
-    this.traverse({ startNode: startNodeId, order: 'breadth', type: 'leafsearch' }, onNode, cb);
+    if (cb) cb = dearrayify(cb);
+    return this.traverse({ startNode: startNodeId, order: 'breadth', type: 'leafsearch' }, onNode).nodeify(cb);
 };
 
 Tree.prototype.depthSearch = function (startNodeId, onNode, cb) {
@@ -242,7 +240,8 @@ Tree.prototype.depthSearch = function (startNodeId, onNode, cb) {
         onNode = startNodeId;
         startNodeId = undefined;
     }
-    this.traverse({ startNode: startNodeId, order: 'depth', type: 'search' }, onNode, cb);
+    if (cb) cb = dearrayify(cb);
+    return this.traverse({ startNode: startNodeId, order: 'depth', type: 'search' }, onNode).nodeify(cb);
 };
 
 Tree.prototype.depthLeafSearch = function (startNodeId, onNode, cb) {
@@ -251,7 +250,8 @@ Tree.prototype.depthLeafSearch = function (startNodeId, onNode, cb) {
         onNode = startNodeId;
         startNodeId = undefined;
     }
-    this.traverse({ startNode: startNodeId, order: 'depth', type: 'leafsearch' }, onNode, cb);
+    if (cb) cb = dearrayify(cb);
+    return this.traverse({ startNode: startNodeId, order: 'depth', type: 'leafsearch' }, onNode).nodeify(cb);
 };
 
 Tree.prototype.depthWalk = function (startNodeId, onNode, cb) {
@@ -260,7 +260,8 @@ Tree.prototype.depthWalk = function (startNodeId, onNode, cb) {
         onNode = startNodeId;
         startNodeId = undefined;
     }
-    this.traverse({ startNode: startNodeId, order: 'depth', type: 'walk' }, onNode, cb);
+    if (cb) cb = dearrayify(cb);
+    return this.traverse({ startNode: startNodeId, order: 'depth', type: 'walk' }, onNode).nodeify(cb);
 };
 
 Tree.prototype.insertNode = function (parentId, data, cb) {
@@ -268,55 +269,59 @@ Tree.prototype.insertNode = function (parentId, data, cb) {
     var dataKey = this.makeNodeDataKey(id);
     var parentKey = this.makeNodeParentKey(id);
 
-    this.callDb('get', parentId, function (err, parent) {
-        parent.push(id);
-        this.db.batch()
-                .put(parentId, parent)
-                .put(id, [])
-                .put(dataKey, data)
-                .put(parentKey, parentId)
-                .write(function (err) {
-                    if (err) return cb(err);
-                    else return cb(null, id);
+    return this.then(function () {
+        return this.getNode(parentId).then(function (parent) {
+            parent.push(id);
+            var batch = this.db.batch()
+                                .put(parentId, parent)
+                                .put(id, [])
+                                .put(dataKey, data)
+                                .put(parentKey, parentId);
+
+            return new Promise(function (yes, no) {
+                batch.write(function (err) {
+                    if (err) return no(err);
+                    yes(id);
                 });
-    }.bind(this));
+            });
+        }.bind(this));
+    }).nodeify(cb);
 };
 
 Tree.prototype.deleteNode = function (nodeId, cb) {
+    var self = this;
     var batch = this.db.batch();
 
-    this.breadthWalk(nodeId, function (id, children, data) {
+    return this.breadthWalk(nodeId, function (id, children, data) {
         batch = batch.del(id);
-    }, function (err) {
-        if (err) return cb(err);               
+    }).then(function () {
+        return self.getNodeParent(nodeId).spread(function (parent, parentNodeId) {
+            without(parent, nodeId);
+            batch.put(parentNodeId, parent);
 
-        this.callDb('get', this.makeNodeParentKey(nodeId), function (err, parentNodeId) {
-            this.callDb('get', parentNodeId, function (err, parent) {
-                if (err) return cb(err);
-                without(parent, nodeId);
-                batch.put(parentNodeId, parent)
-                     .write(cb);
-            });
-        }.bind(this));
-    }.bind(this));
+            return Promise.promisify(batch.write, batch)();
+        });
+    }).nodeify(cb);
 };
 
 Tree.prototype.moveNode = function (nodeId, newParentId, cb) {
     var oldParentId;
 
-    this.getNodeParent(nodeId, function (err, oldParent, oldParentId) {
-        if (err) return cb(err);
-        this.getNode(newParentId, function (err, newParent) {
-            if (err) return cb(err);
-
-            newParent.push(nodeId);
-            oldParent = without(oldParent, nodeId);
-
-            this.db.batch()
-                    .put(oldParentId, oldParent)
-                    .put(newParentId, newParent)
-                    .write(cb);
-            
+    return this.then(function () {
+        return this.getNodeParent(nodeId).spread(function (oldParent, oldParentId) {
+            return this.getNode(newParentId).then(function (newParent) {
+                newParent.push(nodeId);
+                oldParent = without(oldParent, nodeId);
+                var batch = this.db.batch()
+                                    .put(oldParentId, oldParent)
+                                    .put(newParentId, newParent);
+                return new Promise(function (yes, no) {
+                    batch.write(function (err) {
+                        if (err) return no(err);
+                        yes();
+                    });
+                });
+            }.bind(this));
         }.bind(this));
-    }.bind(this));
+    }).nodeify(cb);
 };
