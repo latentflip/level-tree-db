@@ -33,9 +33,8 @@ var Tree = module.exports = function (options, ready) {
     this.treeId = options.treeId;
     this.rootId = this.makeRootId();
 
-    var resolver = Promise.defer();
-    this._setupRoot(resolver.callback);
-    var p = resolver.promise.bind(this);
+    var p = this._setupRoot();
+    p = p.bind(this);
     this.then = p.then.bind(p);
     this.then(function () {
         this.ready = true;
@@ -79,10 +78,19 @@ Tree.prototype.callDb = function (type/*, args... */) {
 };
 
 Tree.prototype._setupRoot = function (cb) {
-    this.db.get(this.rootId, function (err, node) {
-        if (!err && node) return cb();
-        this.db.put(this.rootId, [], cb);
-    }.bind(this));
+    var self = this;
+    var rootId = this.rootId;
+
+    return this.db.getAsync(rootId).catch(
+        function (err) { return err.notFound; },
+        function (err) { return false; }
+    ).then(function (existing) {
+        if (!existing) {
+            return self.db.putAsync(rootId, []);
+        } else {
+            return existing;
+        }
+    }).nodeify(cb);
 };
 
 Tree.prototype.setNodeData = function (id, data, cb) {
