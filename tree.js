@@ -3,6 +3,14 @@ var EventEmitter = require('events').EventEmitter;
 var util = require('util');
 var Promise = require('bluebird');
 
+var promisifyLevel = function (db) {
+    ['put', 'get', 'del'].forEach(function (method) {
+        db[method + 'Async'] = Promise.promisify(db[method], db);
+    });
+
+    return db;
+};
+
 var dearrayify = function (cb) {
     var oldcb = cb;
     cb = function (err, args) {
@@ -25,10 +33,7 @@ var without = function (array, element) {
 var Tree = module.exports = function (options, ready) {
     this.isTree = true;
     this.ready = false;
-    this.db = options.db;
-    this.db.putAsync = Promise.promisify(this.db.put, this.db);
-    this.db.getAsync = Promise.promisify(this.db.get, this.db);
-    this.db.delAsync = Promise.promisify(this.db.del, this.db);
+    this.db = promisifyLevel(options.db);
 
     this.treeId = options.treeId;
     this.rootId = this.makeRootId();
@@ -62,21 +67,6 @@ Tree.prototype.makeRootId = function () {
     return this.treeId + '/root';
 };
 
-
-
-Tree.prototype.callDb = function (type/*, args... */) {
-    var args = Array.prototype.slice.call(arguments);
-    args.shift();
-
-    var doCall = function (done) {
-        this.db[type].apply(this.db, args);
-    }.bind(this);
-
-    this.then(function (yes, no) {
-        doCall();
-    });
-};
-
 Tree.prototype._setupRoot = function (cb) {
     var self = this;
     var rootId = this.rootId;
@@ -94,7 +84,6 @@ Tree.prototype._setupRoot = function (cb) {
 };
 
 Tree.prototype.setNodeData = function (id, data, cb) {
-    //this.callDb('put', this.makeNodeDataKey(id), data, cb);
     return this.then(function () {
         return this.db.putAsync(this.makeNodeDataKey(id), data);
     }).nodeify(cb);
